@@ -1,0 +1,16 @@
+[package]
+name = "seine"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dotenvy = "0.15.7"
+gasket = { git = "https://github.com/construkts/gasket-rs.git", features = [
+    "derive",
+] }
+hex = "0.4.3"
+miette = { version = "7.2.0", features = ["fancy"] }
+serde = { version = "1.0.203", features = ["derive"] }
+serde_json = "1.0.120"
+tokio = { version = "1.38.0", features = ["full"] }
+utxorpc = "0.2.0"
