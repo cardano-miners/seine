@@ -11,7 +11,8 @@ use utxorpc::{
 
 use seine::{
     block::TunaBlock,
-    constants::{initial_point, TUNA_V1_ADDRESS, TUNA_V1_POLICY_ID},
+    constants::{TUNA_V1_ADDRESS, TUNA_V1_POLICY_ID},
+    cursor,
 };
 
 #[tokio::main]
@@ -26,7 +27,9 @@ async fn main() -> miette::Result<()> {
         .build::<CardanoSyncClient>()
         .await;
 
-    let intersect = get_cursor().await;
+    let cursor = cursor::Cursor::new();
+
+    let intersect = cursor.get().await;
 
     let mut tip = client.follow_tip(vec![intersect]).await.into_diagnostic()?;
 
@@ -34,6 +37,12 @@ async fn main() -> miette::Result<()> {
         match event {
             TipEvent::Apply(block) => {
                 let body = block.body.unwrap();
+                let header = block.header.unwrap();
+
+                let intersect = BlockRef {
+                    hash: header.hash,
+                    index: header.slot,
+                };
 
                 for tx in body.tx {
                     for output in tx.outputs {
@@ -91,6 +100,8 @@ async fn main() -> miette::Result<()> {
                         println!("{:#?}", tuna_datum);
                     }
                 }
+
+                cursor.set(intersect).await;
             }
             TipEvent::Undo(_block) => {}
             TipEvent::Reset(_point) => {}
@@ -98,12 +109,4 @@ async fn main() -> miette::Result<()> {
     }
 
     Ok(())
-}
-
-async fn get_cursor() -> BlockRef {
-    tokio::fs::read("./cursor")
-        .await
-        .ok()
-        .and_then(|data| serde_json::from_slice(&data).ok())
-        .unwrap_or_else(initial_point)
 }
