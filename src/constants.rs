@@ -10,6 +10,10 @@ pub const TUNA_V1_POLICY_ID: &[u8] = &[
     0x29, 0x82, 0x59, 0xc2, 0x4b, 0x78, 0xb8, 0x95, 0xcb, 0x41, 0xd9, 0x1a,
 ];
 
+pub const TUNA_V2_ADDRESS: &[u8] = &[0x71];
+
+pub const TUNA_V2_POLICY_ID: &[u8] = &[];
+
 pub fn initial_point() -> BlockRef {
     BlockRef {
         index: 101511762,
