@@ -1,4 +1,4 @@
 pub mod block;
 pub mod constants;
-pub mod cursor;
+pub mod database;
 pub mod extensions;

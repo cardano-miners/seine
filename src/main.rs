@@ -2,18 +2,15 @@ use std::env;
 
 use miette::IntoDiagnostic;
 use utxorpc::{
-    spec::{
-        cardano::{plutus_data::PlutusData, RedeemerPurpose},
-        sync::BlockRef,
-    },
+    spec::cardano::{plutus_data::PlutusData, RedeemerPurpose},
     CardanoSyncClient, ClientBuilder, TipEvent,
 };
 
 use seine::{
     block::TunaBlock,
     constants::{TUNA_V1_POLICY_ID, TUNA_V2_POLICY_ID},
-    cursor,
-    extensions::{BlockBodyExtensions, BlockExtensions, TunaOutput},
+    database::Database,
+    extensions::{BlockBodyExtensions, BlockExtensions, TunaOutput, TxOutputExtensions},
 };
 
 #[tokio::main]
@@ -21,24 +18,24 @@ async fn main() -> miette::Result<()> {
     let _ = dotenvy::dotenv().ok();
 
     let dolos_endpoint = env::var("DOLOS_ENDPOINT").into_diagnostic()?;
+    let dolos_token = env::var("DOLOS_TOKEN").into_diagnostic()?;
     let account_id = env::var("CLOUDFLARE_ACCOUNT_ID").into_diagnostic()?;
     let database_id = env::var("CLOUDFLARE_DATABASE_ID").into_diagnostic()?;
     let d1_token = env::var("CLOUDFLARE_D1_TOKEN").into_diagnostic()?;
-    let d1_endpoint = format!(
-        "https://api.cloudflare.com/client/v4/accounts/{account_id}/d1/database/{database_id}/query"
-    );
+
+    let db = Database::new(account_id, database_id, d1_token);
 
     let mut client = ClientBuilder::new()
         .uri(dolos_endpoint)
         .into_diagnostic()?
+        .metadata("dmtr-api-key", dolos_token)
+        .into_diagnostic()?
         .build::<CardanoSyncClient>()
         .await;
 
-    let cursor = cursor::Cursor::new();
+    let intersect = db.tip().await?;
 
-    let intersect = cursor.get().await;
-
-    let post_client = reqwest::Client::new();
+    dbg!(&intersect);
 
     let mut tip = client.follow_tip(vec![intersect]).await.into_diagnostic()?;
 
@@ -47,16 +44,12 @@ async fn main() -> miette::Result<()> {
             TipEvent::Apply(block) => {
                 let (header, body) = block.parts();
 
-                let intersect = BlockRef {
-                    hash: header.hash,
-                    index: header.slot,
-                };
-
                 for tuna in body.outputs() {
                     match tuna {
-                        TunaOutput::V1(output, inputs) => {
-                            let mut next_tuna_datum: TunaBlock =
-                                output.datum.unwrap().plutus_data.unwrap().try_into()?;
+                        TunaOutput::V1(tx_hash, output, inputs) => {
+                            let mut next_tuna_datum: TunaBlock = output.datum().try_into()?;
+
+                            dbg!(&next_tuna_datum);
 
                             let prev_block_info = inputs.iter().find_map(|input| {
                                 let contains_tuna_state =
@@ -85,7 +78,7 @@ async fn main() -> miette::Result<()> {
 
                             if let Some((_block_number, redeemer)) = prev_block_info {
                                 let PlutusData::Constr(constr) =
-                                    redeemer.datum.unwrap().plutus_data.unwrap()
+                                    redeemer.payload.unwrap().plutus_data.unwrap()
                                 else {
                                     miette::bail!("failed to decode tuna state");
                                 };
@@ -100,34 +93,17 @@ async fn main() -> miette::Result<()> {
                                 next_tuna_datum.nonce = nonce;
                             };
 
-                            let _resp = post_client
-                                .post(&d1_endpoint)
-                                .bearer_auth(&d1_token)
-                                .json(&serde_json::json!({
-                                    "sql": r#"
-                                    INSERT INTO blocks (
-                                        number, hash, leading_zeros,
-                                        target_number, epoch_time,
-                                        current_posix_time, nonce
-                                      )
-                                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                                  "#,
-                                    "params": [
-                                        next_tuna_datum.number,
-                                        next_tuna_datum.current_hash,
-                                        next_tuna_datum.leading_zeros,
-                                        next_tuna_datum.target_number,
-                                        next_tuna_datum.epoch_time,
-                                        next_tuna_datum.current_posix_time,
-                                        next_tuna_datum.nonce,
-                                    ]
-                                }))
-                                .send()
+                            let _resp = db
+                                .insert_block(
+                                    next_tuna_datum,
+                                    tx_hash,
+                                    header.slot,
+                                    hex::encode(&header.hash),
+                                )
                                 .await;
                         }
-                        TunaOutput::V2(output, inputs) => {
-                            let mut next_tuna_datum: TunaBlock =
-                                output.datum.unwrap().plutus_data.unwrap().try_into()?;
+                        TunaOutput::V2(tx_hash, output, inputs) => {
+                            let mut next_tuna_datum: TunaBlock = output.datum().try_into()?;
 
                             let prev_block_info = inputs.iter().find_map(|input| {
                                 let contains_tuna_state =
@@ -156,7 +132,7 @@ async fn main() -> miette::Result<()> {
 
                             if let Some((_block_number, redeemer)) = prev_block_info {
                                 let PlutusData::Constr(constr) =
-                                    redeemer.datum.unwrap().plutus_data.unwrap()
+                                    redeemer.payload.unwrap().plutus_data.unwrap()
                                 else {
                                     miette::bail!("failed to decode tuna state");
                                 };
@@ -224,39 +200,18 @@ async fn main() -> miette::Result<()> {
 
                                 println!("{:#?}", next_tuna_datum);
 
-                                let _resp = post_client
-                                    .post(&d1_endpoint)
-                                    .bearer_auth(&d1_token)
-                                    .json(&serde_json::json!({
-                                        "sql": r#"
-                                          INSERT INTO blocks (
-                                              number, hash, leading_zeros, target_number,
-                                              epoch_time, current_posix_time, nonce, miner_cred,
-                                              nft_cred, data
-                                            )
-                                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                        "#,
-                                        "params": [
-                                            next_tuna_datum.number,
-                                            next_tuna_datum.current_hash,
-                                            next_tuna_datum.leading_zeros,
-                                            next_tuna_datum.target_number,
-                                            next_tuna_datum.epoch_time,
-                                            next_tuna_datum.current_posix_time,
-                                            next_tuna_datum.nonce,
-                                            next_tuna_datum.payment_cred,
-                                            next_tuna_datum.nft_cred,
-                                            next_tuna_datum.data,
-                                        ]
-                                    }))
-                                    .send()
+                                let _resp = db
+                                    .insert_block(
+                                        next_tuna_datum,
+                                        tx_hash,
+                                        header.slot,
+                                        hex::encode(&header.hash),
+                                    )
                                     .await;
                             };
                         }
                     }
                 }
-
-                cursor.set(intersect).await;
             }
             TipEvent::Undo(_block) => {}
             TipEvent::Reset(_point) => {}

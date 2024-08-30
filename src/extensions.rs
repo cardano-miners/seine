@@ -1,4 +1,10 @@
-use utxorpc::spec::cardano::{Asset, Block, BlockBody, BlockHeader, Multiasset, TxInput, TxOutput};
+use utxorpc::{
+    spec::cardano::{
+        plutus_data::PlutusData, Asset, Block, BlockBody, BlockHeader, Multiasset, TxInput,
+        TxOutput,
+    },
+    ChainBlock,
+};
 
 use crate::constants::{TUNA_V1_ADDRESS, TUNA_V1_POLICY_ID, TUNA_V2_ADDRESS, TUNA_V2_POLICY_ID};
 
@@ -6,9 +12,11 @@ pub trait BlockExtensions {
     fn parts(self) -> (BlockHeader, BlockBody);
 }
 
-impl BlockExtensions for Block {
+impl BlockExtensions for ChainBlock<Block> {
     fn parts(self) -> (BlockHeader, BlockBody) {
-        (self.header.unwrap(), self.body.unwrap())
+        let block = self.parsed.unwrap();
+
+        (block.header.unwrap(), block.body.unwrap())
     }
 }
 
@@ -17,23 +25,23 @@ pub trait BlockBodyExtensions {
 }
 
 pub enum TunaOutput {
-    V1(TxOutput, Vec<TxInput>),
-    V2(TxOutput, Vec<TxInput>),
+    V1(String, TxOutput, Vec<TxInput>),
+    V2(String, TxOutput, Vec<TxInput>),
 }
 
 impl BlockBodyExtensions for BlockBody {
     fn outputs(self) -> impl Iterator<Item = TunaOutput> {
         self.tx
             .into_iter()
-            .map(|tx| (tx.outputs, tx.inputs))
-            .filter_map(|(outputs, inputs)| {
+            .map(|tx| (hex::encode(tx.hash), tx.outputs, tx.inputs))
+            .filter_map(|(tx_hash, outputs, inputs)| {
                 for output in outputs {
                     if output.is_tuna_v2() {
-                        return Some(TunaOutput::V2(output, inputs));
+                        return Some(TunaOutput::V2(tx_hash, output, inputs));
                     }
 
                     if output.is_tuna_v1() {
-                        return Some(TunaOutput::V1(output, inputs));
+                        return Some(TunaOutput::V1(tx_hash, output, inputs));
                     }
                 }
 
@@ -46,6 +54,8 @@ pub trait TxOutputExtensions {
     fn is_tuna_v2(&self) -> bool;
 
     fn is_tuna_v1(&self) -> bool;
+
+    fn datum(self) -> PlutusData;
 }
 
 impl TxOutputExtensions for TxOutput {
@@ -61,6 +71,10 @@ impl TxOutputExtensions for TxOutput {
             && is_lord_tuna(&self.assets, TUNA_V1_POLICY_ID, |asset| {
                 asset.name == "lord tuna".as_bytes()
             })
+    }
+
+    fn datum(self) -> PlutusData {
+        self.datum.unwrap().payload.unwrap().plutus_data.unwrap()
     }
 }
 

@@ -10,7 +10,6 @@ pub struct TunaBlock {
     pub epoch_time: u64,
     pub current_posix_time: u64,
     pub nonce: Option<String>,
-    // pub merkle_root: Option<String>,
     pub payment_cred: Option<String>,
     pub nft_cred: Option<String>,
     pub data: Option<String>,
