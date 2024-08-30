@@ -11,8 +11,9 @@ use utxorpc::{
 
 use seine::{
     block::TunaBlock,
-    constants::{TUNA_V1_ADDRESS, TUNA_V1_POLICY_ID, TUNA_V2_ADDRESS, TUNA_V2_POLICY_ID},
+    constants::{TUNA_V1_POLICY_ID, TUNA_V2_POLICY_ID},
     cursor,
+    extensions::{BlockBodyExtensions, BlockExtensions, TunaOutput},
 };
 
 #[tokio::main]
@@ -44,33 +45,20 @@ async fn main() -> miette::Result<()> {
     while let Ok(event) = tip.event().await {
         match event {
             TipEvent::Apply(block) => {
-                let body = block.body.unwrap();
-                let header = block.header.unwrap();
+                let (header, body) = block.parts();
 
                 let intersect = BlockRef {
                     hash: header.hash,
                     index: header.slot,
                 };
 
-                for tx in body.tx {
-                    for output in tx.outputs {
-                        if output.address == TUNA_V1_ADDRESS {
-                            let contains_tuna_state = output.assets.iter().any(|multi_asset| {
-                                multi_asset.policy_id == TUNA_V1_POLICY_ID
-                                    && multi_asset
-                                        .assets
-                                        .iter()
-                                        .any(|asset| asset.name == "lord tuna".as_bytes())
-                            });
-
-                            if !contains_tuna_state {
-                                continue;
-                            }
-
+                for tuna in body.outputs() {
+                    match tuna {
+                        TunaOutput::V1(output, inputs) => {
                             let mut next_tuna_datum: TunaBlock =
                                 output.datum.unwrap().plutus_data.unwrap().try_into()?;
 
-                            let prev_block_info = tx.inputs.iter().find_map(|input| {
+                            let prev_block_info = inputs.iter().find_map(|input| {
                                 let contains_tuna_state =
                                     input.as_output.iter().next().unwrap().assets.iter().any(
                                         |multi_asset| {
@@ -112,11 +100,18 @@ async fn main() -> miette::Result<()> {
                                 next_tuna_datum.nonce = nonce;
                             };
 
-                            println!("{:#?}", next_tuna_datum);
-
-                            let _resp = post_client.post(&d1_endpoint).bearer_auth(&d1_token).json(
-                                &serde_json::json!({
-                                    "sql": "INSERT INTO blocks (number, hash, leading_zeros, target_number, epoch_time, current_posix_time, nonce) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            let _resp = post_client
+                                .post(&d1_endpoint)
+                                .bearer_auth(&d1_token)
+                                .json(&serde_json::json!({
+                                    "sql": r#"
+                                    INSERT INTO blocks (
+                                        number, hash, leading_zeros,
+                                        target_number, epoch_time,
+                                        current_posix_time, nonce
+                                      )
+                                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                                  "#,
                                     "params": [
                                         next_tuna_datum.number,
                                         next_tuna_datum.current_hash,
@@ -126,25 +121,15 @@ async fn main() -> miette::Result<()> {
                                         next_tuna_datum.current_posix_time,
                                         next_tuna_datum.nonce,
                                     ]
-                                }),
-                            ).send().await;
-                        } else if output.address == TUNA_V2_ADDRESS {
-                            let contains_tuna_state = output.assets.iter().any(|multi_asset| {
-                                multi_asset.policy_id == TUNA_V2_POLICY_ID
-                                    && multi_asset
-                                        .assets
-                                        .iter()
-                                        .any(|asset| asset.name.slice(0..4) == "TUNA".as_bytes())
-                            });
-
-                            if !contains_tuna_state {
-                                continue;
-                            }
-
+                                }))
+                                .send()
+                                .await;
+                        }
+                        TunaOutput::V2(output, inputs) => {
                             let mut next_tuna_datum: TunaBlock =
                                 output.datum.unwrap().plutus_data.unwrap().try_into()?;
 
-                            let prev_block_info = tx.inputs.iter().find_map(|input| {
+                            let prev_block_info = inputs.iter().find_map(|input| {
                                 let contains_tuna_state =
                                     input.as_output.iter().next().unwrap().assets.iter().any(
                                         |multi_asset| {
@@ -239,9 +224,18 @@ async fn main() -> miette::Result<()> {
 
                                 println!("{:#?}", next_tuna_datum);
 
-                                let _resp = post_client.post(&d1_endpoint).bearer_auth(&d1_token).json(
-                                    &serde_json::json!({
-                                        "sql": "INSERT INTO blocks (number, hash, leading_zeros, target_number, epoch_time, current_posix_time, nonce, miner_cred, nft_cred, data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                                let _resp = post_client
+                                    .post(&d1_endpoint)
+                                    .bearer_auth(&d1_token)
+                                    .json(&serde_json::json!({
+                                        "sql": r#"
+                                          INSERT INTO blocks (
+                                              number, hash, leading_zeros, target_number,
+                                              epoch_time, current_posix_time, nonce, miner_cred,
+                                              nft_cred, data
+                                            )
+                                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                        "#,
                                         "params": [
                                             next_tuna_datum.number,
                                             next_tuna_datum.current_hash,
@@ -254,8 +248,9 @@ async fn main() -> miette::Result<()> {
                                             next_tuna_datum.nft_cred,
                                             next_tuna_datum.data,
                                         ]
-                                    }),
-                                ).send().await;
+                                    }))
+                                    .send()
+                                    .await;
                             };
                         }
                     }
