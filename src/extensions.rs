@@ -50,6 +50,20 @@ impl BlockBodyExtensions for BlockBody {
     }
 }
 
+pub trait TxInputExtensions {
+    fn is_tuna_v1(&self) -> bool;
+}
+
+impl TxInputExtensions for TxInput {
+    fn is_tuna_v1(&self) -> bool {
+        dbg!(self)
+            .as_output
+            .as_ref()
+            .map(|output| output.is_tuna_v1())
+            .unwrap_or(false)
+    }
+}
+
 pub trait TxOutputExtensions {
     fn is_tuna_v2(&self) -> bool;
 

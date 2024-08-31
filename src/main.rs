@@ -10,7 +10,9 @@ use seine::{
     block::TunaBlock,
     constants::{TUNA_V1_POLICY_ID, TUNA_V2_POLICY_ID},
     database::Database,
-    extensions::{BlockBodyExtensions, BlockExtensions, TunaOutput, TxOutputExtensions},
+    extensions::{
+        BlockBodyExtensions, BlockExtensions, TunaOutput, TxInputExtensions, TxOutputExtensions,
+    },
 };
 
 #[tokio::main]
@@ -26,7 +28,7 @@ async fn main() -> miette::Result<()> {
     let db = Database::new(account_id, database_id, d1_token);
 
     let mut client = ClientBuilder::new()
-        .uri(dolos_endpoint)
+        .uri("http://localhost:50051")
         .into_diagnostic()?
         .metadata("dmtr-api-key", dolos_token)
         .into_diagnostic()?
@@ -34,8 +36,6 @@ async fn main() -> miette::Result<()> {
         .await;
 
     let intersect = db.tip().await?;
-
-    dbg!(&intersect);
 
     let mut tip = client.follow_tip(vec![intersect]).await.into_diagnostic()?;
 
@@ -49,32 +49,15 @@ async fn main() -> miette::Result<()> {
                         TunaOutput::V1(tx_hash, output, inputs) => {
                             let mut next_tuna_datum: TunaBlock = output.datum().try_into()?;
 
-                            dbg!(&next_tuna_datum);
-
-                            let prev_block_info = inputs.iter().find_map(|input| {
-                                let contains_tuna_state =
-                                    input.as_output.iter().next().unwrap().assets.iter().any(
-                                        |multi_asset| {
-                                            multi_asset.policy_id == TUNA_V1_POLICY_ID
-                                                && multi_asset.assets.iter().any(|asset| {
-                                                    asset.name == "lord tuna".as_bytes()
-                                                })
-                                        },
-                                    );
-
-                                if !contains_tuna_state {
-                                    return None;
-                                }
-
-                                input.redeemer.as_ref().and_then(|r| {
-                                    if r.purpose() == RedeemerPurpose::Spend {
+                            let prev_block_info = inputs
+                                .iter()
+                                .filter(|input| input.is_tuna_v1())
+                                .find_map(|input| {
+                                    input.redeemer.as_ref().map(|r| {
                                         // Update previous block info with nonce
-                                        Some((next_tuna_datum.number - 1, r.clone()))
-                                    } else {
-                                        None
-                                    }
-                                })
-                            });
+                                        (next_tuna_datum.number - 1, r.clone())
+                                    })
+                                });
 
                             if let Some((_block_number, redeemer)) = prev_block_info {
                                 let PlutusData::Constr(constr) =

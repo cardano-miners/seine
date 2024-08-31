@@ -3,6 +3,24 @@ use utxorpc::spec::sync::BlockRef;
 
 use crate::{block::TunaBlock, constants::initial_point};
 
+#[derive(Debug, serde::Deserialize)]
+struct QueryResponse<T> {
+    results: Vec<T>,
+    success: bool,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct TipPayload {
+    cardano_hash: String,
+    cardano_slot: u64,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct TipResponse {
+    result: Vec<QueryResponse<TipPayload>>,
+    success: bool,
+}
+
 pub struct Database {
     client: reqwest::Client,
     endpoint: String,
@@ -21,7 +39,7 @@ impl Database {
     }
 
     pub async fn tip(&self) -> miette::Result<BlockRef> {
-        let res: serde_json::Value = self
+        let res: TipResponse = self
             .client
             .post(&self.endpoint)
             .bearer_auth(&self.d1_token)
@@ -40,9 +58,16 @@ impl Database {
             .await
             .into_diagnostic()?;
 
-        dbg!(res);
+        if res.success && !res.result.is_empty() && res.result[0].success {
+            let payload = &res.result[0].results[0];
 
-        Ok(initial_point())
+            Ok(BlockRef {
+                index: payload.cardano_slot,
+                hash: hex::decode(&payload.cardano_hash).into_diagnostic()?.into(),
+            })
+        } else {
+            Ok(initial_point())
+        }
     }
 
     pub async fn insert_block(
