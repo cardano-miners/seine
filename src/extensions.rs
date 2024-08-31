@@ -1,7 +1,7 @@
 use utxorpc::{
     spec::cardano::{
-        plutus_data::PlutusData, Asset, Block, BlockBody, BlockHeader, Multiasset, TxInput,
-        TxOutput,
+        plutus_data::PlutusData, Asset, Block, BlockBody, BlockHeader, Multiasset, Redeemer,
+        TxInput, TxOutput,
     },
     ChainBlock,
 };
@@ -52,14 +52,22 @@ impl BlockBodyExtensions for BlockBody {
 
 pub trait TxInputExtensions {
     fn is_tuna_v1(&self) -> bool;
+
+    fn is_tuna_v2(&self) -> bool;
 }
 
 impl TxInputExtensions for TxInput {
     fn is_tuna_v1(&self) -> bool {
-        dbg!(self)
-            .as_output
+        self.as_output
             .as_ref()
             .map(|output| output.is_tuna_v1())
+            .unwrap_or(false)
+    }
+
+    fn is_tuna_v2(&self) -> bool {
+        self.as_output
+            .as_ref()
+            .map(|output| output.is_tuna_v2())
             .unwrap_or(false)
     }
 }
@@ -89,6 +97,16 @@ impl TxOutputExtensions for TxOutput {
 
     fn datum(self) -> PlutusData {
         self.datum.unwrap().payload.unwrap().plutus_data.unwrap()
+    }
+}
+
+pub trait RedeemerExtensions {
+    fn plutus_data(self) -> PlutusData;
+}
+
+impl RedeemerExtensions for Redeemer {
+    fn plutus_data(self) -> PlutusData {
+        self.payload.unwrap().plutus_data.unwrap()
     }
 }
 

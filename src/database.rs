@@ -76,8 +76,9 @@ impl Database {
         cardano_tx_hash: String,
         cardano_slot: u64,
         cardano_hash: String,
-    ) -> Result<serde_json::Value, reqwest::Error> {
-        self.client
+    ) -> Result<(), reqwest::Error> {
+        let res: Result<serde_json::Value, _> = self
+            .client
             .post(&self.endpoint)
             .bearer_auth(&self.d1_token)
             .json(&serde_json::json!({
@@ -110,6 +111,21 @@ impl Database {
             .send()
             .await?
             .json()
-            .await
+            .await;
+
+        match res {
+            Ok(value) => {
+                if value["success"].as_bool().unwrap() {
+                    println!("inserted block {}", block.number)
+                } else {
+                    println!("failed to insert {}", block.number)
+                }
+            }
+            Err(_) => {
+                println!("failed to insert {}", block.number)
+            }
+        }
+
+        Ok(())
     }
 }

@@ -1,19 +1,9 @@
 use std::env;
 
 use miette::IntoDiagnostic;
-use utxorpc::{
-    spec::cardano::{plutus_data::PlutusData, RedeemerPurpose},
-    CardanoSyncClient, ClientBuilder, TipEvent,
-};
+use utxorpc::{spec::cardano::plutus_data::PlutusData, CardanoSyncClient, ClientBuilder, TipEvent};
 
-use seine::{
-    block::TunaBlock,
-    constants::{TUNA_V1_POLICY_ID, TUNA_V2_POLICY_ID},
-    database::Database,
-    extensions::{
-        BlockBodyExtensions, BlockExtensions, TunaOutput, TxInputExtensions, TxOutputExtensions,
-    },
-};
+use seine::{block::TunaBlock, database::Database, extensions::*};
 
 #[tokio::main]
 async fn main() -> miette::Result<()> {
@@ -60,9 +50,7 @@ async fn main() -> miette::Result<()> {
                                 });
 
                             if let Some((_block_number, redeemer)) = prev_block_info {
-                                let PlutusData::Constr(constr) =
-                                    redeemer.payload.unwrap().plutus_data.unwrap()
-                                else {
+                                let PlutusData::Constr(constr) = redeemer.plutus_data() else {
                                     miette::bail!("failed to decode tuna state");
                                 };
 
@@ -88,35 +76,18 @@ async fn main() -> miette::Result<()> {
                         TunaOutput::V2(tx_hash, output, inputs) => {
                             let mut next_tuna_datum: TunaBlock = output.datum().try_into()?;
 
-                            let prev_block_info = inputs.iter().find_map(|input| {
-                                let contains_tuna_state =
-                                    input.as_output.iter().next().unwrap().assets.iter().any(
-                                        |multi_asset| {
-                                            multi_asset.policy_id == TUNA_V2_POLICY_ID
-                                                && multi_asset.assets.iter().any(|asset| {
-                                                    asset.name.slice(0..4) == "TUNA".as_bytes()
-                                                })
-                                        },
-                                    );
-
-                                if !contains_tuna_state {
-                                    return None;
-                                }
-
-                                input.redeemer.as_ref().and_then(|r| {
-                                    if r.purpose() == RedeemerPurpose::Spend {
+                            let prev_block_info = inputs
+                                .iter()
+                                .filter(|input| input.is_tuna_v2())
+                                .find_map(|input| {
+                                    input.redeemer.as_ref().map(|r| {
                                         // Update previous block info with nonce
-                                        Some((next_tuna_datum.number - 1, r.clone()))
-                                    } else {
-                                        None
-                                    }
-                                })
-                            });
+                                        (next_tuna_datum.number - 1, r.clone())
+                                    })
+                                });
 
                             if let Some((_block_number, redeemer)) = prev_block_info {
-                                let PlutusData::Constr(constr) =
-                                    redeemer.payload.unwrap().plutus_data.unwrap()
-                                else {
+                                let PlutusData::Constr(constr) = redeemer.plutus_data() else {
                                     miette::bail!("failed to decode tuna state");
                                 };
 
