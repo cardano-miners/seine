@@ -3,7 +3,7 @@ use std::env;
 use miette::IntoDiagnostic;
 use utxorpc::{spec::cardano::plutus_data::PlutusData, CardanoSyncClient, ClientBuilder, TipEvent};
 
-use seine::{block::TunaBlock, database::Database, extensions::*};
+use seine::{block::TunaBlock, database::Database, discord, extensions::*};
 
 #[tokio::main]
 async fn main() -> miette::Result<()> {
@@ -14,6 +14,7 @@ async fn main() -> miette::Result<()> {
     let account_id = env::var("CLOUDFLARE_ACCOUNT_ID").into_diagnostic()?;
     let database_id = env::var("CLOUDFLARE_DATABASE_ID").into_diagnostic()?;
     let d1_token = env::var("CLOUDFLARE_D1_TOKEN").into_diagnostic()?;
+    let discord_webhook_url = env::var("DISCORD_WEBHOOK_URL").into_diagnostic()?;
 
     let db = Database::new(account_id, database_id, d1_token);
 
@@ -64,14 +65,21 @@ async fn main() -> miette::Result<()> {
                                 next_tuna_datum.nonce = nonce;
                             };
 
-                            let _resp = db
-                                .insert_block(
-                                    next_tuna_datum,
-                                    tx_hash,
-                                    header.slot,
-                                    hex::encode(&header.hash),
-                                )
+                            let block_hash = hex::encode(&header.hash);
+
+                            let resp = db
+                                .insert_block(&next_tuna_datum, &tx_hash, header.slot, &block_hash)
                                 .await;
+
+                            if resp.is_ok() {
+                                discord::send_webhook(
+                                    &discord_webhook_url,
+                                    &next_tuna_datum,
+                                    &tx_hash,
+                                    &block_hash,
+                                )
+                                .await?;
+                            }
                         }
                         TunaOutput::V2(tx_hash, output, inputs) => {
                             let mut next_tuna_datum: TunaBlock = output.datum().try_into()?;
@@ -154,14 +162,26 @@ async fn main() -> miette::Result<()> {
 
                                 println!("{:#?}", next_tuna_datum);
 
-                                let _resp = db
+                                let block_hash = hex::encode(&header.hash);
+
+                                let resp = db
                                     .insert_block(
-                                        next_tuna_datum,
-                                        tx_hash,
+                                        &next_tuna_datum,
+                                        &tx_hash,
                                         header.slot,
-                                        hex::encode(&header.hash),
+                                        &block_hash,
                                     )
                                     .await;
+
+                                if resp.is_ok() {
+                                    discord::send_webhook(
+                                        &discord_webhook_url,
+                                        &next_tuna_datum,
+                                        &tx_hash,
+                                        &block_hash,
+                                    )
+                                    .await?;
+                                }
                             };
                         }
                     }

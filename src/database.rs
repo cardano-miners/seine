@@ -72,12 +72,12 @@ impl Database {
 
     pub async fn insert_block(
         &self,
-        block: TunaBlock,
-        cardano_tx_hash: String,
+        block: &TunaBlock,
+        cardano_tx_hash: &str,
         cardano_slot: u64,
-        cardano_hash: String,
-    ) -> Result<(), reqwest::Error> {
-        let res: Result<serde_json::Value, _> = self
+        cardano_hash: &str,
+    ) -> miette::Result<()> {
+        let value: serde_json::Value = self
             .client
             .post(&self.endpoint)
             .bearer_auth(&self.d1_token)
@@ -109,23 +109,20 @@ impl Database {
                 ]
             }))
             .send()
-            .await?
+            .await
+            .into_diagnostic()?
             .json()
-            .await;
+            .await
+            .into_diagnostic()?;
 
-        match res {
-            Ok(value) => {
-                if value["success"].as_bool().unwrap() {
-                    println!("inserted block {}", block.number)
-                } else {
-                    println!("failed to insert {}", block.number)
-                }
-            }
-            Err(_) => {
-                println!("failed to insert {}", block.number)
-            }
+        if value["success"].as_bool().unwrap() {
+            println!("inserted block {}", block.number);
+
+            Ok(())
+        } else {
+            println!("failed to insert {}", block.number);
+
+            miette::bail!("failed to insert block")
         }
-
-        Ok(())
     }
 }
