@@ -70,7 +70,7 @@ impl Database {
         }
     }
 
-    pub async fn insert_block(
+    pub async fn apply(
         &self,
         block: &TunaBlock,
         cardano_tx_hash: &str,
@@ -129,13 +129,71 @@ impl Database {
             .into_diagnostic()?;
 
         if value["success"].as_bool().unwrap() {
-            println!("inserted block {}", block.number);
+            println!("applied tuna block {}", block.number);
 
             Ok(())
         } else {
             println!("failed to insert {}", block.number);
 
             miette::bail!("failed to insert block")
+        }
+    }
+
+    pub async fn undo(&self, slot: u64) -> miette::Result<()> {
+        let value: serde_json::Value = self
+            .client
+            .post(&self.endpoint)
+            .bearer_auth(&self.d1_token)
+            .json(&serde_json::json!({
+                "sql": r#"
+                    DELETE FROM blocks WHERE cardano_slot >= ?
+                "#,
+                "params": [
+                    slot,
+                ]
+            }))
+            .send()
+            .await
+            .into_diagnostic()?
+            .json()
+            .await
+            .into_diagnostic()?;
+
+        if value["success"].as_bool().unwrap() {
+            println!("undid {}", slot);
+
+            Ok(())
+        } else {
+            miette::bail!("failed to undo {}", slot)
+        }
+    }
+
+    pub async fn reset(&self, point: BlockRef) -> miette::Result<()> {
+        let value: serde_json::Value = self
+            .client
+            .post(&self.endpoint)
+            .bearer_auth(&self.d1_token)
+            .json(&serde_json::json!({
+                "sql": r#"
+                    DELETE FROM blocks WHERE cardano_slot > ?
+                "#,
+                "params": [
+                    point.index,
+                ]
+            }))
+            .send()
+            .await
+            .into_diagnostic()?
+            .json()
+            .await
+            .into_diagnostic()?;
+
+        if value["success"].as_bool().unwrap() {
+            println!("reset to {}", point.index);
+
+            Ok(())
+        } else {
+            miette::bail!("failed to reset to {}", point.index)
         }
     }
 }

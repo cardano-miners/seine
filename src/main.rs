@@ -18,20 +18,20 @@ async fn main() -> miette::Result<()> {
 
     let db = Database::new(account_id, database_id, d1_token);
 
-    let mut client = ClientBuilder::new()
-        .uri(dolos_endpoint)
-        .into_diagnostic()?
-        .metadata("dmtr-api-key", dolos_token)
-        .into_diagnostic()?
-        .build::<CardanoSyncClient>()
-        .await;
-
-    let intersect = db.tip().await?;
-
-    let mut tip = client.follow_tip(vec![intersect]).await.into_diagnostic()?;
-
     loop {
-        println!("waiting for tip event");
+        println!("connecting");
+
+        let mut client = ClientBuilder::new()
+            .uri(&dolos_endpoint)
+            .into_diagnostic()?
+            .metadata("dmtr-api-key", &dolos_token)
+            .into_diagnostic()?
+            .build::<CardanoSyncClient>()
+            .await;
+
+        let intersect = db.tip().await?;
+
+        let mut tip = client.follow_tip(vec![intersect]).await.into_diagnostic()?;
 
         while let Ok(event) = tip.event().await {
             match event {
@@ -72,12 +72,7 @@ async fn main() -> miette::Result<()> {
                                 let block_hash = hex::encode(&header.hash);
 
                                 let _resp = db
-                                    .insert_block(
-                                        &next_tuna_datum,
-                                        &tx_hash,
-                                        header.slot,
-                                        &block_hash,
-                                    )
+                                    .apply(&next_tuna_datum, &tx_hash, header.slot, &block_hash)
                                     .await;
                             }
                             TunaOutput::V2(tx_hash, output, inputs) => {
@@ -136,13 +131,13 @@ async fn main() -> miette::Result<()> {
                                             let PlutusData::BoundedBytes(policy) =
                                                 miner_cred.fields[0].plutus_data.as_ref().unwrap()
                                             else {
-                                                todo!()
+                                                unreachable!()
                                             };
 
                                             let PlutusData::BoundedBytes(asset_name) =
                                                 miner_cred.fields[1].plutus_data.as_ref().unwrap()
                                             else {
-                                                todo!()
+                                                unreachable!()
                                             };
 
                                             let _data = miner_cred.fields[3]
@@ -163,30 +158,28 @@ async fn main() -> miette::Result<()> {
 
                                 let block_hash = hex::encode(&header.hash);
 
-                                let resp = db
-                                    .insert_block(
-                                        &next_tuna_datum,
-                                        &tx_hash,
-                                        header.slot,
-                                        &block_hash,
-                                    )
-                                    .await;
-
-                                if resp.is_ok() {
-                                    discord::send_webhook(
-                                        &discord_webhook_url,
-                                        &next_tuna_datum,
-                                        &tx_hash,
-                                        &block_hash,
-                                    )
+                                db.apply(&next_tuna_datum, &tx_hash, header.slot, &block_hash)
                                     .await?;
-                                }
+
+                                discord::send_webhook(
+                                    &discord_webhook_url,
+                                    &next_tuna_datum,
+                                    &tx_hash,
+                                    &block_hash,
+                                )
+                                .await?;
                             }
                         }
                     }
                 }
-                TipEvent::Undo(_block) => {}
-                TipEvent::Reset(_point) => {}
+                TipEvent::Undo(block) => {
+                    let (header, _body) = block.parts();
+
+                    db.undo(header.slot).await?;
+                }
+                TipEvent::Reset(point) => {
+                    db.reset(point).await?;
+                }
             }
         }
 
