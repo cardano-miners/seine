@@ -14,7 +14,7 @@ COPY . .
 RUN cargo build --release --bin seine
 
 # We do not need the Rust toolchain to run the binary!
-FROM debian:bullseye-slim AS runtime
+FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y pkg-config libssl-dev
 WORKDIR /app
 COPY --from=builder /app/target/release/seine /usr/local/bin
