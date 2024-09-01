@@ -30,150 +30,166 @@ async fn main() -> miette::Result<()> {
 
     let mut tip = client.follow_tip(vec![intersect]).await.into_diagnostic()?;
 
-    while let Ok(event) = tip.event().await {
-        match event {
-            TipEvent::Apply(block) => {
-                let (header, body) = block.parts();
+    loop {
+        println!("waiting for tip event");
 
-                for tuna in body.outputs() {
-                    match tuna {
-                        TunaOutput::V1(tx_hash, output, inputs) => {
-                            let mut next_tuna_datum: TunaBlock = output.datum().try_into()?;
+        while let Ok(event) = tip.event().await {
+            match event {
+                TipEvent::Apply(block) => {
+                    let (header, body) = block.parts();
 
-                            let prev_block_info = inputs
-                                .iter()
-                                .filter(|input| input.is_tuna_v1())
-                                .find_map(|input| {
-                                    input.redeemer.as_ref().map(|r| {
-                                        // Update previous block info with nonce
-                                        (next_tuna_datum.number - 1, r.clone())
-                                    })
-                                });
+                    for tuna in body.outputs() {
+                        match tuna {
+                            TunaOutput::V1(tx_hash, output, inputs) => {
+                                let mut next_tuna_datum: TunaBlock = output.datum().try_into()?;
 
-                            if let Some((_block_number, redeemer)) = prev_block_info {
-                                let PlutusData::Constr(constr) = redeemer.plutus_data() else {
-                                    miette::bail!("failed to decode tuna state");
+                                let prev_block_info = inputs
+                                    .iter()
+                                    .filter(|input| input.is_tuna_v1())
+                                    .find_map(|input| {
+                                        input.redeemer.as_ref().map(|r| {
+                                            // Update previous block info with nonce
+                                            (next_tuna_datum.number - 1, r.clone())
+                                        })
+                                    });
+
+                                if let Some((_block_number, redeemer)) = prev_block_info {
+                                    let PlutusData::Constr(constr) = redeemer.plutus_data() else {
+                                        miette::bail!("failed to decode tuna state");
+                                    };
+
+                                    let nonce =
+                                        constr.fields[0].plutus_data.as_ref().and_then(|data| {
+                                            match data {
+                                                PlutusData::BoundedBytes(b) => Some(hex::encode(b)),
+                                                _ => None,
+                                            }
+                                        });
+
+                                    next_tuna_datum.nonce = nonce;
                                 };
 
-                                let nonce = constr.fields[0].plutus_data.as_ref().and_then(
-                                    |data| match data {
-                                        PlutusData::BoundedBytes(b) => Some(hex::encode(b)),
-                                        _ => None,
-                                    },
-                                );
+                                let block_hash = hex::encode(&header.hash);
 
-                                next_tuna_datum.nonce = nonce;
-                            };
+                                let _resp = db
+                                    .insert_block(
+                                        &next_tuna_datum,
+                                        &tx_hash,
+                                        header.slot,
+                                        &block_hash,
+                                    )
+                                    .await;
+                            }
+                            TunaOutput::V2(tx_hash, output, inputs) => {
+                                let mut next_tuna_datum: TunaBlock = output.datum().try_into()?;
 
-                            let block_hash = hex::encode(&header.hash);
+                                let prev_block_info = inputs
+                                    .iter()
+                                    .filter(|input| input.is_tuna_v2())
+                                    .find_map(|input| {
+                                        input.redeemer.as_ref().map(|r| {
+                                            // Update previous block info with nonce
+                                            (next_tuna_datum.number - 1, r.clone())
+                                        })
+                                    });
 
-                            let _resp = db
-                                .insert_block(&next_tuna_datum, &tx_hash, header.slot, &block_hash)
-                                .await;
-                        }
-                        TunaOutput::V2(tx_hash, output, inputs) => {
-                            let mut next_tuna_datum: TunaBlock = output.datum().try_into()?;
+                                if let Some((_block_number, redeemer)) = prev_block_info {
+                                    let PlutusData::Constr(constr) = redeemer.plutus_data() else {
+                                        miette::bail!("failed to decode tuna state");
+                                    };
 
-                            let prev_block_info = inputs
-                                .iter()
-                                .filter(|input| input.is_tuna_v2())
-                                .find_map(|input| {
-                                    input.redeemer.as_ref().map(|r| {
-                                        // Update previous block info with nonce
-                                        (next_tuna_datum.number - 1, r.clone())
-                                    })
-                                });
+                                    let nonce =
+                                        constr.fields[0].plutus_data.as_ref().and_then(|data| {
+                                            match data {
+                                                PlutusData::BoundedBytes(b) => Some(hex::encode(b)),
+                                                _ => None,
+                                            }
+                                        });
 
-                            if let Some((_block_number, redeemer)) = prev_block_info {
-                                let PlutusData::Constr(constr) = redeemer.plutus_data() else {
-                                    miette::bail!("failed to decode tuna state");
-                                };
+                                    next_tuna_datum.nonce = nonce;
 
-                                let nonce = constr.fields[0].plutus_data.as_ref().and_then(
-                                    |data| match data {
-                                        PlutusData::BoundedBytes(b) => Some(hex::encode(b)),
-                                        _ => None,
-                                    },
-                                );
+                                    let PlutusData::Constr(miner_cred) =
+                                        constr.fields[1].plutus_data.as_ref().unwrap()
+                                    else {
+                                        todo!()
+                                    };
 
-                                next_tuna_datum.nonce = nonce;
+                                    match miner_cred.tag {
+                                        121 => {
+                                            let PlutusData::BoundedBytes(b) =
+                                                miner_cred.fields[0].plutus_data.as_ref().unwrap()
+                                            else {
+                                                todo!()
+                                            };
 
-                                let PlutusData::Constr(miner_cred) =
-                                    constr.fields[1].plutus_data.as_ref().unwrap()
-                                else {
-                                    todo!()
-                                };
+                                            let _data = miner_cred.fields[1]
+                                                .plutus_data
+                                                .as_ref()
+                                                .unwrap()
+                                                .clone();
 
-                                match miner_cred.tag {
-                                    121 => {
-                                        let PlutusData::BoundedBytes(b) =
-                                            miner_cred.fields[0].plutus_data.as_ref().unwrap()
-                                        else {
-                                            todo!()
-                                        };
+                                            next_tuna_datum.payment_cred = Some(hex::encode(b));
+                                            // next_tuna_datum.data =
+                                            // Some(serde_json::json!(data).to_string());
+                                        }
+                                        122 => {
+                                            let PlutusData::BoundedBytes(policy) =
+                                                miner_cred.fields[0].plutus_data.as_ref().unwrap()
+                                            else {
+                                                todo!()
+                                            };
 
-                                        let _data = miner_cred.fields[1]
-                                            .plutus_data
-                                            .as_ref()
-                                            .unwrap()
-                                            .clone();
+                                            let PlutusData::BoundedBytes(asset_name) =
+                                                miner_cred.fields[1].plutus_data.as_ref().unwrap()
+                                            else {
+                                                todo!()
+                                            };
 
-                                        next_tuna_datum.payment_cred = Some(hex::encode(b));
-                                        // next_tuna_datum.data =
-                                        // Some(serde_json::json!(data).to_string());
+                                            let _data = miner_cred.fields[3]
+                                                .plutus_data
+                                                .as_ref()
+                                                .unwrap()
+                                                .clone();
+
+                                            next_tuna_datum.nft_cred = Some(format!(
+                                                "{}{}",
+                                                hex::encode(policy),
+                                                hex::encode(asset_name)
+                                            ));
+                                        }
+                                        _ => unreachable!(),
                                     }
-                                    122 => {
-                                        let PlutusData::BoundedBytes(policy) =
-                                            miner_cred.fields[0].plutus_data.as_ref().unwrap()
-                                        else {
-                                            todo!()
-                                        };
+                                };
 
-                                        let PlutusData::BoundedBytes(asset_name) =
-                                            miner_cred.fields[1].plutus_data.as_ref().unwrap()
-                                        else {
-                                            todo!()
-                                        };
+                                let block_hash = hex::encode(&header.hash);
 
-                                        let _data = miner_cred.fields[3]
-                                            .plutus_data
-                                            .as_ref()
-                                            .unwrap()
-                                            .clone();
+                                let resp = db
+                                    .insert_block(
+                                        &next_tuna_datum,
+                                        &tx_hash,
+                                        header.slot,
+                                        &block_hash,
+                                    )
+                                    .await;
 
-                                        next_tuna_datum.nft_cred = Some(format!(
-                                            "{}{}",
-                                            hex::encode(policy),
-                                            hex::encode(asset_name)
-                                        ));
-                                    }
-                                    _ => unreachable!(),
+                                if resp.is_ok() {
+                                    discord::send_webhook(
+                                        &discord_webhook_url,
+                                        &next_tuna_datum,
+                                        &tx_hash,
+                                        &block_hash,
+                                    )
+                                    .await?;
                                 }
-                            };
-
-                            let block_hash = hex::encode(&header.hash);
-
-                            let resp = db
-                                .insert_block(&next_tuna_datum, &tx_hash, header.slot, &block_hash)
-                                .await;
-
-                            if resp.is_ok() {
-                                discord::send_webhook(
-                                    &discord_webhook_url,
-                                    &next_tuna_datum,
-                                    &tx_hash,
-                                    &block_hash,
-                                )
-                                .await?;
                             }
                         }
                     }
                 }
+                TipEvent::Undo(_block) => {}
+                TipEvent::Reset(_point) => {}
             }
-            TipEvent::Undo(_block) => {}
-            TipEvent::Reset(_point) => {}
         }
-    }
 
-    Ok(())
+        println!("disconnected");
+    }
 }
