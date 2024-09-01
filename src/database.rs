@@ -91,6 +91,19 @@ impl Database {
                         cardano_hash
                       )
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (number) DO UPDATE SET
+                        hash = excluded.hash,
+                        leading_zeros = excluded.leading_zeros,
+                        target_number = excluded.target_number,
+                        epoch_time = excluded.epoch_time,
+                        current_posix_time = excluded.current_posix_time,
+                        nonce = excluded.nonce,
+                        miner_cred = excluded.miner_cred,
+                        nft_cred = excluded.nft_cred,
+                        data = excluded.data,
+                        cardano_tx_hash = excluded.cardano_tx_hash,
+                        cardano_slot = excluded.cardano_slot,
+                        cardano_hash = excluded.cardano_hash
                 "#,
                 "params": [
                     block.number,

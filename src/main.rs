@@ -19,7 +19,7 @@ async fn main() -> miette::Result<()> {
     let db = Database::new(account_id, database_id, d1_token);
 
     let mut client = ClientBuilder::new()
-        .uri("http://localhost:50051")
+        .uri(dolos_endpoint)
         .into_diagnostic()?
         .metadata("dmtr-api-key", dolos_token)
         .into_diagnostic()?
@@ -67,19 +67,9 @@ async fn main() -> miette::Result<()> {
 
                             let block_hash = hex::encode(&header.hash);
 
-                            let resp = db
+                            let _resp = db
                                 .insert_block(&next_tuna_datum, &tx_hash, header.slot, &block_hash)
                                 .await;
-
-                            if resp.is_ok() {
-                                discord::send_webhook(
-                                    &discord_webhook_url,
-                                    &next_tuna_datum,
-                                    &tx_hash,
-                                    &block_hash,
-                                )
-                                .await?;
-                            }
                         }
                         TunaOutput::V2(tx_hash, output, inputs) => {
                             let mut next_tuna_datum: TunaBlock = output.datum().try_into()?;
@@ -106,6 +96,8 @@ async fn main() -> miette::Result<()> {
                                     },
                                 );
 
+                                next_tuna_datum.nonce = nonce;
+
                                 let PlutusData::Constr(miner_cred) =
                                     constr.fields[1].plutus_data.as_ref().unwrap()
                                 else {
@@ -113,7 +105,7 @@ async fn main() -> miette::Result<()> {
                                 };
 
                                 match miner_cred.tag {
-                                    0 => {
+                                    121 => {
                                         let PlutusData::BoundedBytes(b) =
                                             miner_cred.fields[0].plutus_data.as_ref().unwrap()
                                         else {
@@ -130,7 +122,7 @@ async fn main() -> miette::Result<()> {
                                         // next_tuna_datum.data =
                                         // Some(serde_json::json!(data).to_string());
                                     }
-                                    1 => {
+                                    122 => {
                                         let PlutusData::BoundedBytes(policy) =
                                             miner_cred.fields[0].plutus_data.as_ref().unwrap()
                                         else {
@@ -157,32 +149,23 @@ async fn main() -> miette::Result<()> {
                                     }
                                     _ => unreachable!(),
                                 }
-
-                                next_tuna_datum.nonce = nonce;
-
-                                println!("{:#?}", next_tuna_datum);
-
-                                let block_hash = hex::encode(&header.hash);
-
-                                let resp = db
-                                    .insert_block(
-                                        &next_tuna_datum,
-                                        &tx_hash,
-                                        header.slot,
-                                        &block_hash,
-                                    )
-                                    .await;
-
-                                if resp.is_ok() {
-                                    discord::send_webhook(
-                                        &discord_webhook_url,
-                                        &next_tuna_datum,
-                                        &tx_hash,
-                                        &block_hash,
-                                    )
-                                    .await?;
-                                }
                             };
+
+                            let block_hash = hex::encode(&header.hash);
+
+                            let resp = db
+                                .insert_block(&next_tuna_datum, &tx_hash, header.slot, &block_hash)
+                                .await;
+
+                            if resp.is_ok() {
+                                discord::send_webhook(
+                                    &discord_webhook_url,
+                                    &next_tuna_datum,
+                                    &tx_hash,
+                                    &block_hash,
+                                )
+                                .await?;
+                            }
                         }
                     }
                 }

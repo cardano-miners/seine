@@ -84,7 +84,7 @@ impl TxOutputExtensions for TxOutput {
     fn is_tuna_v2(&self) -> bool {
         self.address == TUNA_V2_ADDRESS
             && is_lord_tuna(&self.assets, TUNA_V2_POLICY_ID, |asset| {
-                asset.name.slice(0..4) == "TUNA".as_bytes()
+                asset.name.slice(0..4) == "TUNA".as_bytes() && asset.name.len() == 32
             })
     }
 
