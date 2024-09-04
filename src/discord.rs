@@ -85,5 +85,10 @@ fn make_target(target_number: u64, leading_zeros: u64) -> String {
 }
 
 fn calculate_epoch(block_number: u64) -> u64 {
-    block_number / 2016 + 1
+    // We passed 15 epochs before hard forking.
+    if block_number <= 15 * 2016 {
+        block_number / 2016 + 1
+    } else {
+        (block_number - (15 * 2016)) / 504 + 16
+    }
 }
