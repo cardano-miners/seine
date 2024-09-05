@@ -165,7 +165,6 @@ async fn main() -> miette::Result<()> {
                                     &discord_webhook_url,
                                     &next_tuna_datum,
                                     &tx_hash,
-                                    &block_hash,
                                 )
                                 .await?;
                             }

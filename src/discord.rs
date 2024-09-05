@@ -1,7 +1,5 @@
 use chrono::{DateTime, TimeZone, Utc};
 use miette::IntoDiagnostic;
-use num_bigint::BigUint;
-use num_traits::pow;
 use serenity::all::{Colour, CreateEmbed};
 use serenity::builder::ExecuteWebhook;
 use serenity::http::Http;
@@ -9,29 +7,12 @@ use serenity::model::webhook::Webhook;
 
 use crate::block::TunaBlock;
 
-pub async fn send_webhook(
-    url: &str,
-    block: &TunaBlock,
-    tx_hash: &str,
-    block_hash: &str,
-) -> miette::Result<()> {
+pub async fn send_webhook(url: &str, block: &TunaBlock, tx_hash: &str) -> miette::Result<()> {
     let http = Http::new("");
 
     let webhook = Webhook::from_url(&http, url).await.into_diagnostic()?;
 
-    let description = format!(
-        "Cardano Info\n- [Block](https://cexplorer.io/block/{})\n- [Transaction](https://cexplorer.io/tx/{})",
-        block_hash,
-        tx_hash
-    );
-
-    // Calculate the combined target
-    let target = make_target(block.target_number, block.leading_zeros);
-
-    let nonce = match block.nonce.as_deref() {
-        Some(nonce) => format!("`{}`", nonce),
-        None => "N/A".to_string(),
-    };
+    let description = format!("[Transaction Info](https://cexplorer.io/tx/{})", tx_hash);
 
     let miner_cred = block
         .payment_cred
@@ -58,8 +39,6 @@ pub async fn send_webhook(
         .title(format!("New Block Mined: #{}", block.number))
         .description(description)
         .field("Hash", format!("`{}`", block.current_hash), false)
-        .field("Target", format!("`{}`", target), false)
-        .field("Nonce", nonce, false)
         .field("Miner Credential", miner_cred, false)
         .field("Data", data, false)
         .field("Epoch", epoch.to_string(), true)
@@ -74,14 +53,6 @@ pub async fn send_webhook(
         .into_diagnostic()?;
 
     Ok(())
-}
-
-fn make_target(target_number: u64, leading_zeros: u64) -> String {
-    let base: BigUint = 16u64.into();
-    let exponent = 60 - leading_zeros;
-    let multiplier = pow(base, exponent as usize);
-    let value = BigUint::from(target_number) * multiplier;
-    format!("{:0>64x}", value)
 }
 
 fn calculate_epoch(block_number: u64) -> u64 {
