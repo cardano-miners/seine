@@ -14,13 +14,6 @@ pub async fn send_webhook(url: &str, block: &TunaBlock, tx_hash: &str) -> miette
 
     let description = format!("[Transaction Info](https://cexplorer.io/tx/{})", tx_hash);
 
-    let miner_cred = block
-        .payment_cred
-        .as_deref()
-        .or(block.nft_cred.as_deref())
-        .map(|cred| format!("`{}`", cred))
-        .unwrap_or_else(|| "N/A".to_string());
-
     let data = match block.data.as_deref() {
         Some(data) => format!("`{}`", data),
         None => "N/A".to_string(),
@@ -38,8 +31,6 @@ pub async fn send_webhook(url: &str, block: &TunaBlock, tx_hash: &str) -> miette
     let embed = CreateEmbed::new()
         .title(format!("New Block Mined: #{}", block.number))
         .description(description)
-        .field("Hash", format!("`{}`", block.current_hash), false)
-        .field("Miner Credential", miner_cred, false)
         .field("Data", data, false)
         .field("Epoch", epoch.to_string(), true)
         .field("Time", formatted_time, true)
