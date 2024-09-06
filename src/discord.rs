@@ -15,8 +15,8 @@ pub async fn send_webhook(url: &str, block: &TunaBlock, tx_hash: &str) -> miette
     let epoch = calculate_epoch(block.number);
 
     let embed = CreateEmbed::new()
-        .title(format!(
-            "[New Block Mined: #{}](https://cexplorer.io/tx/{})",
+        .description(format!(
+            "# [New Block Mined: #{}](https://cexplorer.io/tx/{})",
             block.number, tx_hash
         ))
         .field("Epoch", epoch.to_string(), true)
