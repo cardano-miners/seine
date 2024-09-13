@@ -29,6 +29,8 @@ async fn main() -> miette::Result<()> {
             .build::<CardanoSyncClient>()
             .await;
 
+        println!("connected");
+
         let intersect = db.tip().await?;
 
         let mut tip = client.follow_tip(vec![intersect]).await.into_diagnostic()?;
